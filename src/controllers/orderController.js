@@ -13,7 +13,7 @@ try{
     if(!(validator.isValidObjectId(userId1))) return res.status(400).send({status: false, message: "Please Provide valid userId"})  
 
     //checking for authorization
-    if(userId1 != req.headers["userid"]) return res.status(401).send({status: false, message: "User is not Authorized"}) 
+    if(userId1 != req.loggedUser) return res.status(401).send({status: false, message: "User is not Authorized"}) 
 
 
     const orderDetails = req.body;
@@ -56,6 +56,9 @@ try{
 }
 }
 
+
+
+
 const updateOrders = async function(req,res){
 try{
 
@@ -66,7 +69,7 @@ try{
     if(!(validator.isValidObjectId(userId))) return res.status(400).send({status: false, message: "Please Provide valid userId"})  
 
     //checking for authorization
-    if(userId != req.headers["userid"]) return res.status(401).send({status: false, message: "User is not Authorized"}) 
+    if(userId != req.loggedUser) return res.status(401).send({status: false, message: "User is not Authorized"}) 
 
     //checked if user exists or not
     const user = await userModel.findById(userId)

@@ -157,11 +157,9 @@ try{
     if (!(validator.isValidObjectId(userId))) return res.status(400).send({ status: false, message: "Please Provide valid userId" })
 
     //checking for authorized user
-    if (userId != req.headers["userid"]) return res.status(401).send({ status: false, message: "User is not Authorized" })
-
+    if (userId != req.loggedUser) return res.status(401).send({ status: false, message: "User is not Authorized" })
 
     const userDetails = await userModel.findById({ _id: userId })
-
     if (!userDetails) return res.status(404).send({ status: false, message: "No such User Exists" })
 
     return res.status(200).send({ status: true, message: "User profile details", data: userDetails })
@@ -171,164 +169,158 @@ try{
 }
 
 
-
 const updateUserProfile = async function (req, res) {
-try{
-
-    let userId = req.params.userId;
-
-    //checking valid userId
-    if (!(validator.isValidObjectId(userId))) return res.status(400).send({ status: false, message: "Please Provide valid userId" })
-
-    //checking for authorized user
-    if (userId != req.headers["userid"]) return res.status(401).send({ status: false, message: "You are not authorised." })
-
-
-        let files = req.files
-        if (files && files.length > 0) {
-            let uploadedFileURL = await aws.uploadFile(files[0])
-            req.body.profileImage = uploadedFileURL;
+    try{
+    
+        let userId = req.params.userId;
+    
+        //checking valid userId
+        if (!(validator.isValidObjectId(userId))) return res.status(400).send({ status: false, message: "Please Provide valid userId" })
+    
+        //checking for authorized user
+        if (userId != req.loggedUser) return res.status(401).send({ status: false, message: "You are not authorised." })
+    
+    
+            let files = req.files
+            if (files && files.length > 0) {
+                let uploadedFileURL = await aws.uploadFile(files[0])
+                req.body.profileImage = uploadedFileURL;
+            }
+    
+    
+        const updateData = req.body;
+        if (Object.keys(updateData).length == 0) return res.status(400).send({ status: false, message: "Please provide user details to be updated." })
+    
+        
+            //duplication check for valid Indian phone  
+        if (Object.hasOwn(updateData,"phone")) {
+            if (!(validator.checkIndianNumber(updateData.phone))) {
+                return res.status(400).send({ status: false, message: "Please provide valid phone number." })
+            }
+            let duplicate = await userModel.findOne({ phone: updateData.phone });
+            if (duplicate) return res.status(400).send({ status: false, message: "Phone number is already in use" });
         }
-
-
-    const updateData = req.body;
-    if (Object.keys(updateData).length == 0) return res.status(400).send({ status: false, message: "Please provide user details to be updated." })
-
-    const keysToUpdate = Object.keys(updateData);
-
-    if (keysToUpdate.includes("phone")) {
-        if (!(validator.checkIndianNumber(updateData.phone))) {
-            return res.status(400).send({ status: false, message: "Please provide valid phone number." })
+    
+        //duplication check for a valid email   
+        if (Object.hasOwn(updateData,"email")) {
+            if (!(validator.checkValidEmail(updateData.email))) {
+                return res.status(400).send({ status: false, message: "Please provide valid Email-Id." })
+            }
+            let duplicate = await userModel.findOne({ email: updateData.email });
+            if(duplicate) return res.status(400).send({ status: false, message: "Email Id is already in use" });
         }
-    }
-
-    //duplication check for a valid email   
-    if (keysToUpdate.includes("email")) {
-        if (!(validator.checkValidEmail(updateData.email))) {
-            return res.status(400).send({ status: false, message: "Please provide valid Email-Id." })
+    
+        if (Object.hasOwn(updateData,"password")) {
+            if (updateData.password.length < 8 || updateData.password.length > 15) {
+                return res.status(400).send({ status: false, message: "Please provide password length in range 8-15." })
+            }
+            const pass = await bcrypt.hash(password, saltRounds)
+            updateData.password = pass
         }
-        let duplicate = await userModel.findOne({ email: updateData.email });
-        if(!duplicate) return res.status(400).send({ status: false, message: "Email Id is already in use" });
-    }
-
-    if (keysToUpdate.includes("password")) {
-        if (updateData.password.length < 8 || updateData.password.length > 15) {
-            return res.status(400).send({ status: false, message: "Please provide password length in range 8-15." })
+    
+        const user = await userModel.findOne({ _id: userId })
+        if (!user) return res.status(404).send({ status: false, message: "User not found" })
+    
+        const prevAddress = user.address;
+    
+        //checking if address is in object format
+        if (Object.hasOwn(updateData,"address")) {
+            if (typeof (updateData.address) != "object" || Object.keys(updateData.address).length == 0) return res.status(400).send({ status: false, message: "Please enter address in object format with valid keys." })
+            const keys1 = Object.keys(updateData.address)
+    
+            //if only billing address is passed for updation and not shipping
+            if (keys1.includes("billing") && !(keys1.includes("shipping"))) {
+                if (typeof (updateData.address.billing) != "object" || Object.keys(updateData.address.billing).length == 0) return res.status(400).send({ status: false, message: "Please enter billing address in object format with valid keys." })
+    
+                if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
+                updateData.address.billing.city = updateData.address.billing.city.trim();
+                if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
+    
+                if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
+                updateData.address.billing.street = updateData.address.billing.street.trim();
+                if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
+    
+    
+                if (!(updateData.address.billing.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper billing pincode" })
+                updateData.address.billing.pincode = JSON.parse(updateData.address.billing.pincode)
+                if (!(validator.checkIndianPincode(updateData.address.billing.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit billing pincode." })
+    
+                updateData.address.shipping = prevAddress.shipping;//created key-'shipping' inside address object of update data and its value is taken from existing shipping address
+    
+                const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
+                return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
+    
+                //if only shipping address is passed for updation and not billing
+            } else if (!(keys1.includes("billing")) && keys1.includes("shipping")) {
+                if (typeof (updateData.address.shipping) != "object" || Object.keys(updateData.address.shipping).length == 0) return res.status(400).send({ status: false, message: "Please enter shipping address in object format." })
+    
+                if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
+                updateData.address.shipping.city = updateData.address.shipping.city.trim();
+                if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
+    
+    
+                if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
+                updateData.address.shipping.street = updateData.address.shipping.street.trim();
+                if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
+    
+    
+                if (!(updateData.address.shipping.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper shipping pincode" })
+                updateData.address.shipping.pincode = JSON.parse(updateData.address.shipping.pincode)
+                if (!(validator.checkIndianPincode(updateData.address.shipping.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit shipping pincode." })
+    
+    
+                updateData.address.billing = prevAddress.billing;//created key-'billing' inside address object of update data and its value is taken from existing billing address
+    
+                const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
+                return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
+    
+                //if both billing and shipping is passed for updation
+            } else if ((keys1.includes("billing")) && keys1.includes("shipping")) {
+                if (typeof (updateData.address.shipping) != "object" || Object.keys(updateData.address.shipping).length == 0) return res.status(400).send({ status: false, message: "Please enter shipping address in object format." })
+    
+                if (typeof (updateData.address.billing) != "object" || Object.keys(updateData.address.billing).length == 0) return res.status(400).send({ status: false, message: "Please enter billing address in object format." })
+    
+    
+                if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
+                updateData.address.billing.city = updateData.address.billing.city.trim();
+                if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
+    
+                if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
+                updateData.address.billing.street = updateData.address.billing.street.trim();
+                if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
+    
+    
+                if (!(updateData.address.billing.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper billing pincode" })
+                updateData.address.billing.pincode = JSON.parse(updateData.address.billing.pincode)
+                if (!(validator.checkIndianPincode(updateData.address.billing.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit billing pincode." })
+    
+                if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
+                updateData.address.shipping.city = updateData.address.shipping.city.trim();
+                if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
+    
+    
+                if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
+                updateData.address.shipping.street = updateData.address.shipping.street.trim();
+                if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
+    
+    
+                if (!(updateData.address.shipping.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper shipping pincode" })
+                updateData.address.shipping.pincode = JSON.parse(updateData.address.shipping.pincode)
+                if (!(validator.checkIndianPincode(updateData.address.shipping.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit shipping pincode." })
+    
+    
+                const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
+                return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
+    
+            }
+    
         }
-        const pass = await bcrypt.hash(password, saltRounds)
-        updateData.password = pass
+    
+        const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
+        return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
+    }catch(error){
+        return res.status(500).send({status:false, Error:error.message})
     }
-
-    //duplication check for phone    
-    if ((keysToUpdate.includes("phone"))) {
-        let duplicate = await userModel.findOne({ phone: updateData.phone });
-        if (!duplicate) return res.status(400).send({ status: false, message: "Phone number is already in use" });
-
     }
-
-    const user = await userModel.findOne({ _id: userId })
-    if (!user) return res.status(404).send({ status: false, message: "User not found" })
-
-    const prevAddress = user.address;
-
-    //checking if address is in object format
-    if (keysToUpdate.includes("address")) {
-        if (typeof (updateData.address) != "object" || Object.keys(updateData.address).length == 0) return res.status(400).send({ status: false, message: "Please enter address in object format with valid keys." })
-        const keys1 = Object.keys(updateData.address)
-
-        //if only billing address is passed for updation and not shipping
-        if (keys1.includes("billing") && !(keys1.includes("shipping"))) {
-            if (typeof (updateData.address.billing) != "object" || Object.keys(updateData.address.billing).length == 0) return res.status(400).send({ status: false, message: "Please enter billing address in object format with valid keys." })
-
-            if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
-            updateData.address.billing.city = updateData.address.billing.city.trim();
-            if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
-
-            if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
-            updateData.address.billing.street = updateData.address.billing.street.trim();
-            if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
-
-
-            if (!(updateData.address.billing.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper billing pincode" })
-            updateData.address.billing.pincode = JSON.parse(updateData.address.billing.pincode)
-            if (!(validator.checkIndianPincode(updateData.address.billing.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit billing pincode." })
-
-            updateData.address.shipping = prevAddress.shipping;//created key-'shipping' inside address object of update data and its value is taken from existing shipping address
-
-            const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
-            return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
-
-            //if only shipping address is passed for updation and not billing
-        } else if (!(keys1.includes("billing")) && keys1.includes("shipping")) {
-            if (typeof (updateData.address.shipping) != "object" || Object.keys(updateData.address.shipping).length == 0) return res.status(400).send({ status: false, message: "Please enter shipping address in object format." })
-
-            if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
-            updateData.address.shipping.city = updateData.address.shipping.city.trim();
-            if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
-
-
-            if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
-            updateData.address.shipping.street = updateData.address.shipping.street.trim();
-            if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
-
-
-            if (!(updateData.address.shipping.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper shipping pincode" })
-            updateData.address.shipping.pincode = JSON.parse(updateData.address.shipping.pincode)
-            if (!(validator.checkIndianPincode(updateData.address.shipping.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit shipping pincode." })
-
-
-            updateData.address.billing = prevAddress.billing;//created key-'billing' inside address object of update data and its value is taken from existing billing address
-
-            const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
-            return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
-
-            //if both billing and shipping is passed for updation
-        } else if ((keys1.includes("billing")) && keys1.includes("shipping")) {
-            if (typeof (updateData.address.shipping) != "object" || Object.keys(updateData.address.shipping).length == 0) return res.status(400).send({ status: false, message: "Please enter shipping address in object format." })
-
-            if (typeof (updateData.address.billing) != "object" || Object.keys(updateData.address.billing).length == 0) return res.status(400).send({ status: false, message: "Please enter billing address in object format." })
-
-
-            if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
-            updateData.address.billing.city = updateData.address.billing.city.trim();
-            if (!(updateData.address.billing.city)) return res.status(400).send({ status: false, message: "Please provide a proper billing city" })
-
-            if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
-            updateData.address.billing.street = updateData.address.billing.street.trim();
-            if (!(updateData.address.billing.street)) return res.status(400).send({ status: false, message: "Please provide a proper billing street" })
-
-
-            if (!(updateData.address.billing.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper billing pincode" })
-            updateData.address.billing.pincode = JSON.parse(updateData.address.billing.pincode)
-            if (!(validator.checkIndianPincode(updateData.address.billing.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit billing pincode." })
-
-            if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
-            updateData.address.shipping.city = updateData.address.shipping.city.trim();
-            if (!(updateData.address.shipping.city)) return res.status(400).send({ status: false, message: "Please provide a proper shipping city" })
-
-
-            if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
-            updateData.address.shipping.street = updateData.address.shipping.street.trim();
-            if (!(updateData.address.shipping.street)) return res.status(400).send({ status: false, message: "Please provide a proper shipping street" })
-
-
-            if (!(updateData.address.shipping.pincode)) return res.status(400).send({ status: false, message: "Please provide a proper shipping pincode" })
-            updateData.address.shipping.pincode = JSON.parse(updateData.address.shipping.pincode)
-            if (!(validator.checkIndianPincode(updateData.address.shipping.pincode))) return res.status(400).send({ status: false, message: "Please enter a valid 6 digit shipping pincode." })
-
-
-            const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
-            return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
-
-        }
-
-    }
-
-    const updatedUser = await userModel.findOneAndUpdate({ _id: userId }, updateData, { new: true });
-    return res.status(200).send({ status: true, message: "User profile updated.", data: updatedUser })
-}catch(error){
-    return res.status(500).send({status:false, Error:error.message})
-}
-}
 
 module.exports = { registerUser, loginUser, getUserProfile, updateUserProfile }
